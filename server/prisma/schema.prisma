@@ -1,0 +1,237 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ──────────────────────────────────────────────────────
+
+enum Role {
+  SYSTEM_ADMIN
+  LIBRARIAN
+  STUDENT
+}
+
+enum Condition {
+  NEW
+  GOOD
+  WORN
+  DAMAGED
+}
+
+enum CopyStatus {
+  AVAILABLE
+  ISSUED
+  RESERVED
+  MAINTENANCE
+  RETIRED
+}
+
+enum IssueStatus {
+  ACTIVE
+  RETURNED
+  OVERDUE
+  LOST
+}
+
+enum ReservationStatus {
+  PENDING
+  READY
+  FULFILLED
+  EXPIRED
+  CANCELLED
+}
+
+enum FineReason {
+  OVERDUE
+  LOST_BOOK
+  DAMAGED_BOOK
+}
+
+enum FineStatus {
+  UNPAID
+  PAID
+  WAIVED
+}
+
+// ─── Identity ───────────────────────────────────────────────────
+
+model User {
+  id           String   @id   // Snowflake ID (set at application layer)
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(STUDENT)
+  enrollmentId String?  @unique
+  department   String?
+  phone        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  issuedBooks  BookIssue[]
+  fines        Fine[]
+  reservations Reservation[]
+  auditLogs    AuditLog[]
+
+  @@index([email])
+  @@index([enrollmentId])
+}
+
+// ─── Catalog ────────────────────────────────────────────────────
+
+model Book {
+  id            String       @id   // Snowflake ID
+  isbn          String       @unique
+  title         String
+  subtitle      String?
+  authors       String[]
+  publisher     String
+  publishedYear Int
+  edition       String?
+  language      String       @default("en")
+  pages         Int?
+  category      BookCategory @relation(fields: [categoryId], references: [id])
+  categoryId    String
+  coverUrl      String?
+  description   String?
+  tags          String[]
+  copies        BookCopy[]
+  reservations  Reservation[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([title])
+  @@index([isbn])
+  @@index([categoryId])
+}
+
+model BookCategory {
+  id             String      @id @default(uuid())
+  name           String      @unique
+  maxIssueDays   Int         @default(14)
+  maxRenewals    Int         @default(2)
+  finePolicy     FinePolicy? @relation(fields: [finePolicyId], references: [id])
+  finePolicyId   String?
+  books          Book[]
+}
+
+model BookCopy {
+  id         String     @id    // UUIDv7
+  barcode    String     @unique
+  book       Book       @relation(fields: [bookId], references: [id])
+  bookId     String
+  condition  Condition  @default(GOOD)
+  location   String?
+  status     CopyStatus @default(AVAILABLE)
+  acquiredAt DateTime   @default(now())
+  retiredAt  DateTime?
+  notes      String?
+
+  issues     BookIssue[]
+
+  @@index([bookId])
+  @@index([barcode])
+  @@index([status])
+}
+
+// ─── Issue & Return ─────────────────────────────────────────────
+
+model BookIssue {
+  id          String      @id    // Snowflake ID
+  copy        BookCopy    @relation(fields: [copyId], references: [id])
+  copyId      String
+  issuedTo    User        @relation(fields: [userId], references: [id])
+  userId      String
+  issuedBy    String
+  issuedAt    DateTime    @default(now())
+  dueAt       DateTime
+  returnedAt  DateTime?
+  returnedBy  String?
+  status      IssueStatus @default(ACTIVE)
+  notes       String?
+
+  renewals    IssueRenewal[]
+  fines       Fine[]
+
+  @@index([userId])
+  @@index([copyId])
+  @@index([status])
+  @@index([dueAt])
+  @@index([status, dueAt])
+}
+
+model IssueRenewal {
+  id        String    @id @default(uuid())
+  issue     BookIssue @relation(fields: [issueId], references: [id])
+  issueId   String
+  renewedAt DateTime  @default(now())
+  newDueAt  DateTime
+  renewedBy String
+}
+
+model Reservation {
+  id          String            @id @default(uuid())
+  book        Book              @relation(fields: [bookId], references: [id])
+  bookId      String
+  user        User              @relation(fields: [userId], references: [id])
+  userId      String
+  status      ReservationStatus @default(PENDING)
+  reservedAt  DateTime          @default(now())
+  expiresAt   DateTime?
+  notifiedAt  DateTime?
+
+  @@index([bookId, status])
+  @@index([userId])
+}
+
+// ─── Fines ──────────────────────────────────────────────────────
+
+model FinePolicy {
+  id              String         @id @default(uuid())
+  name            String         @unique
+  ratePerDay      Decimal        @db.Decimal(10, 2)
+  gracePeriodDays Int            @default(0)
+  maxFineAmount   Decimal?       @db.Decimal(10, 2)
+  categories      BookCategory[]
+}
+
+model Fine {
+  id        String     @id    // Snowflake ID
+  issue     BookIssue  @relation(fields: [issueId], references: [id])
+  issueId   String
+  user      User       @relation(fields: [userId], references: [id])
+  userId    String
+  amount    Decimal    @db.Decimal(10, 2)
+  reason    FineReason
+  status    FineStatus @default(UNPAID)
+  waivedBy  String?
+  waivedAt  DateTime?
+  waiverNote String?
+  paidAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([userId, status])
+  @@index([issueId])
+}
+
+// ─── Audit ──────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actor      User     @relation(fields: [actorId], references: [id])
+  actorId    String
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  timestamp  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([timestamp])
+}

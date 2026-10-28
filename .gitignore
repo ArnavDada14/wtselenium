@@ -1,0 +1,17 @@
+# Dependencies and build output
+**/node_modules/
+**/dist/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local development files
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]
+*.local
+.DS_Store
